@@ -74,11 +74,11 @@
         <button data-kind="wall">wall</button>
         <button data-kind="neutral">neutral</button>
       </div>
-      <label class="field" style="margin-top:8px">Label (paint name / reference id)
+      <label class="field" id="labelField" style="margin-top:8px">Label (paint name / reference id)
         <input id="label" list="labels" placeholder="e.g. Hague Blue" />
         <datalist id="labels"></datalist>
       </label>
-      <label class="field" style="margin-top:8px">Region (source surface)
+      <label class="field" id="regionField" style="margin-top:8px">Region (source surface)
         <input id="region" list="regions" placeholder="e.g. chimney wall" />
         <datalist id="regions"></datalist>
       </label>
@@ -199,8 +199,8 @@ view.addEventListener('click', e => {
   const rect = view.getBoundingClientRect();
   const x = Math.round((e.clientX-rect.left) * view.width/rect.width);
   const y = Math.round((e.clientY-rect.top)  * view.height/rect.height);
-  const label = $('#label').value.trim();
-  const region = $('#region').value.trim();
+  const label = state.kind==='swatch' ? $('#label').value.trim() : '';
+  const region = state.kind==='neutral' ? '' : $('#region').value.trim();
   if(state.kind === 'swatch'){
     const s = samplePatch(state.images[state.active], x, y, state.patchRadius);
     state.images[state.active].points.push({ kind:'swatch', region, label, x, y, rgb:s.rgb, std:s.std, n:s.n });
@@ -349,14 +349,19 @@ $('#radius').addEventListener('input', e => {
   state.patchRadius = Math.max(0, Math.min(40, +e.target.value||0));
   setPatchInfo(); resampleGlobals(); renderTables(); updateJSON();
 });
+function applyKindUI(){
+  [...$('#kindrow').children].forEach(c => c.classList.toggle('on', c.dataset.kind===state.kind));
+  $('#kindhint').textContent = KIND_HINT[state.kind];
+  $('#labelField').style.display  = state.kind==='swatch' ? '' : 'none';
+  $('#regionField').style.display = state.kind==='neutral' ? 'none' : '';
+}
 $('#kindrow').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
   state.kind = b.dataset.kind;
-  [...$('#kindrow').children].forEach(c => c.classList.toggle('on', c===b));
-  $('#kindhint').textContent = KIND_HINT[state.kind];
+  applyKindUI();
 });
 setPatchInfo();
-$('#kindhint').textContent = KIND_HINT.swatch;
+applyKindUI();
 </script>
 </body>
 </html>
