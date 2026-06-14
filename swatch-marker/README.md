@@ -60,9 +60,11 @@ tool only repaints inside the mask, and uses it to decide which region's transfe
    **Backspace** undoes the last vertex, **Esc** cancels.
 4. Add **hole** polygons for things in front of the wall (furniture, radiator, pictures, sockets)
    — they get cut out of that region.
+5. **Adjust** any vertex by dragging it (the cursor turns into a move icon over a grabbable point);
+   works on finished polygons and the one you're still placing.
 
-Polygons belong to the frame they're drawn on; draw them on your clean bare-wall reference photo.
-A wall is a plane, so its outline is usually 4–6 clicks. Per-region polygons double as the region
-map — no separate segmentation needed.
+Polygons are **global** — like wall/neutral points, the geometry is identical across tripod-locked
+frames, so they're drawn once and shown on every photo. A wall is a plane, so its outline is usually
+4–6 clicks. Per-region polygons double as the region map — no separate segmentation needed.
 
 Coordinates are natural-image pixels; RGB is gamma-encoded sRGB (linearized downstream).

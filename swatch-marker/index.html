@@ -123,7 +123,7 @@
           <button id="cancelPoly">Cancel</button>
           <span class="hint" id="draftinfo"></span>
         </div>
-        <div class="sectitle">Polygons <span class="hint">— this frame</span></div>
+        <div class="sectitle">Polygons <span class="hint">— all frames</span></div>
         <table id="polytable"><thead>
           <tr><th></th><th>region</th><th>type</th><th>pts</th><th></th></tr>
         </thead><tbody></tbody></table>
@@ -144,13 +144,14 @@
 <canvas class="loupe" id="loupe" width="160" height="160"></canvas>
 
 <script>
-const SAMPLE_VERSION = 4;
-const state = { patchRadius: 6, images: [], globals: [], active: -1, kind: 'swatch', mode: 'points', draft: null };
+const SAMPLE_VERSION = 5;
+const state = { patchRadius: 6, images: [], globals: [], polygons: [], active: -1, kind: 'swatch', mode: 'points', draft: null, drag: null };
 const REGION_PALETTE = ['#ff6b6b','#4dd2ff','#ffd24d','#9d7bff','#5bff9d','#ff8ad8','#ff9d4d','#7dff4d'];
 function regionColors(){
   const order=[]; const add=r=>{ if(r && !order.includes(r)) order.push(r); };
   state.globals.forEach(g=>add(g.region));
-  state.images.forEach(im=>{ im.points.forEach(p=>add(p.region)); im.polygons.forEach(p=>add(p.region)); });
+  state.polygons.forEach(p=>add(p.region));
+  state.images.forEach(im=>im.points.forEach(p=>add(p.region)));
   const map={}; order.forEach((r,i)=>map[r]=REGION_PALETTE[i%REGION_PALETTE.length]);
   return map;
 }
@@ -196,7 +197,7 @@ function loadFiles(fileList){
     img.onload = () => {
       let im = state.images.find(x => x.name===f.name && !x.img); // attach to an imported placeholder if present
       if(im){ im.img = img; im.width = img.naturalWidth; im.height = img.naturalHeight; }
-      else { im = { name:f.name, width:img.naturalWidth, height:img.naturalHeight, img, points:[], polygons:[] }; state.images.push(im); }
+      else { im = { name:f.name, width:img.naturalWidth, height:img.naturalHeight, img, points:[] }; state.images.push(im); }
       const r = state.patchRadius;
       state.globals.forEach(g => g.samples[im.name] = samplePatch(im, g.x, g.y, r)); // back-fill / refresh this frame
       if(state.active === -1) setActive(state.images.indexOf(im)); else { renderTabs(); renderTables(); renderPolyTable(); updateJSON(); }
@@ -230,18 +231,17 @@ function importJSON(obj){
     kind:g.kind, region:g.region, label:g.label, x:g.x, y:g.y,
     samples: Object.fromEntries(Object.entries(g.samples).map(([k,v]) => [k, toSample(v)]))
   }));
+  state.polygons = [];
+  obj.mask.forEach(grp => {
+    grp.polygons.forEach(pts => state.polygons.push({ region:grp.region||'', type:'fill', pts }));
+    grp.holes.forEach(pts => state.polygons.push({ region:grp.region||'', type:'hole', pts }));
+  });
   const prev = new Map(state.images.map(im => [im.name, im])); // keep already-loaded pixels by filename
   state.images = obj.images.map(im => {
-    const polygons = [];
-    im.mask.forEach(grp => {
-      grp.polygons.forEach(pts => polygons.push({ region:grp.region||'', type:'fill', pts }));
-      grp.holes.forEach(pts => polygons.push({ region:grp.region||'', type:'hole', pts }));
-    });
     const existing = prev.get(im.filename);
     return {
       name: im.filename, width: im.width, height: im.height, img: existing ? existing.img : null,
-      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, n:p.patchPixels })),
-      polygons
+      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, n:p.patchPixels }))
     };
   });
   refreshLabels();
@@ -279,6 +279,7 @@ function renderTabs(){
 // ---------- clicking ----------
 view.addEventListener('click', e => {
   if(state.active<0) return;
+  if(suppressClick){ suppressClick = false; return; } // came from a vertex drag, don't add a point
   const rect = view.getBoundingClientRect();
   const x = Math.round((e.clientX-rect.left) * view.width/rect.width);
   const y = Math.round((e.clientY-rect.top)  * view.height/rect.height);
@@ -318,8 +319,8 @@ function redraw(){
     vctx.lineWidth=R*0.18; vctx.strokeStyle=col; vctx.beginPath(); vctx.arc(p.x,p.y,R,0,7); vctx.stroke();
     drawTag(idx+1, p.x+R*1.3, p.y, R, col);
   });
-  // mask polygons
-  im.polygons.forEach(poly => drawPolygon(poly, rc, false));
+  // mask polygons (global — same on every frame)
+  state.polygons.forEach(poly => drawPolygon(poly, rc, false));
   if(state.mode==='mask' && state.draft) drawPolygon(state.draft, rc, true);
 }
 function drawTag(t, x, y, R, color){
@@ -406,10 +407,10 @@ function buildExport(){
       kind:g.kind, region:g.region, label:g.label, x:g.x, y:g.y,
       samples: Object.fromEntries(state.images.map(im => [im.name, fmt(g.samples[im.name])]))
     })),
+    mask: groupPolys(state.polygons),
     images: state.images.map(im => ({
       filename:im.name, width:im.width, height:im.height,
-      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, patchPixels:p.n })),
-      mask: groupPolys(im.polygons)
+      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, patchPixels:p.n }))
     }))
   };
 }
@@ -462,7 +463,7 @@ function addVertex(x,y){
 function finishPoly(){
   const d = state.draft;
   if(!d || d.pts.length<3){ $('#maskhint').textContent='Need at least 3 vertices before finishing.'; return; }
-  state.images[state.active].polygons.push(d);
+  state.polygons.push(d);
   state.draft = null;
   $('#maskhint').textContent='Polygon added. Click to start another.';
   redraw(); renderPolyTable(); updateDraftInfo(); updateJSON();
@@ -478,13 +479,12 @@ function groupPolys(polys){
   return [...map.values()];
 }
 function renderPolyTable(){
-  const im = state.images[state.active]; const tb = $('#polytable tbody'); tb.innerHTML='';
-  if(!im) return;
+  const tb = $('#polytable tbody'); tb.innerHTML='';
   const rc = regionColors();
-  im.polygons.forEach((p,idx) => {
+  state.polygons.forEach((p,idx) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${idx+1}</td>${regionCell(p.region, rc)}<td>${p.type}</td><td>${p.pts.length}</td><td><button class="del">✕</button></td>`;
-    tr.querySelector('.del').onclick = () => { im.polygons.splice(idx,1); redraw(); renderPolyTable(); updateJSON(); };
+    tr.querySelector('.del').onclick = () => { state.polygons.splice(idx,1); redraw(); renderPolyTable(); updateJSON(); };
     tb.appendChild(tr);
   });
 }
@@ -516,7 +516,8 @@ $('#modebar').addEventListener('click', e => {
   [...$('#modebar').children].forEach(c => c.classList.toggle('on', c.dataset.mode===state.mode));
   $('#pointsPanel').style.display = state.mode==='points' ? '' : 'none';
   $('#maskPanel').style.display   = state.mode==='mask'   ? '' : 'none';
-  if(state.mode!=='mask') state.draft = null;
+  if(state.mode!=='mask'){ state.draft = null; state.drag = null; }
+  view.style.cursor = 'crosshair';
   redraw(); updateDraftInfo();
 });
 $('#typerow').addEventListener('click', e => {
@@ -532,6 +533,44 @@ window.addEventListener('keydown', e => {
   if(e.key==='Enter') finishPoly();
   else if(e.key==='Escape') cancelDraft();
   else if(e.key==='Backspace' && state.draft){ state.draft.pts.pop(); redraw(); updateDraftInfo(); e.preventDefault(); }
+});
+
+// ---------- vertex editing (mask mode): drag a vertex to adjust ----------
+let suppressClick = false;
+function eventXY(e){
+  const rect = view.getBoundingClientRect();
+  return [ (e.clientX-rect.left)*view.width/rect.width, (e.clientY-rect.top)*view.height/rect.height ];
+}
+function vertsOf(owner){ return owner==='draft' ? state.draft.pts : state.polygons[owner].pts; }
+function hitTestVertex(x,y){
+  if(state.active<0) return null;
+  const g = Math.max(state.images[state.active].width/120, 14); let best=null, bd=g*g;
+  const consider = (pts, owner) => pts && pts.forEach((p,vi) => { const dx=p[0]-x, dy=p[1]-y, d=dx*dx+dy*dy; if(d<=bd){ bd=d; best={owner, vi}; } });
+  state.polygons.forEach((poly,pi) => consider(poly.pts, pi));
+  if(state.draft) consider(state.draft.pts, 'draft');
+  return best;
+}
+view.addEventListener('mousedown', e => {
+  if(state.active<0 || state.mode!=='mask') return;
+  const [x,y] = eventXY(e);
+  const hit = hitTestVertex(x,y);
+  if(hit){ state.drag = { owner:hit.owner, vi:hit.vi, moved:false }; e.preventDefault(); }
+});
+view.addEventListener('mousemove', e => {
+  if(state.mode!=='mask' || state.active<0) return;
+  const [x,y] = eventXY(e);
+  if(state.drag){
+    vertsOf(state.drag.owner)[state.drag.vi] = [Math.round(x), Math.round(y)];
+    state.drag.moved = true; redraw();
+  } else {
+    view.style.cursor = hitTestVertex(x,y) ? 'move' : 'crosshair';
+  }
+});
+window.addEventListener('mouseup', () => {
+  if(!state.drag) return;
+  if(state.drag.moved) updateJSON();
+  suppressClick = true; // swallow the click that follows mouseup so it doesn't add a vertex
+  state.drag = null;
 });
 </script>
 </body>
