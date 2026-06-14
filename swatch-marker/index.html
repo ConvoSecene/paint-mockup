@@ -222,25 +222,25 @@ function readJSONFile(f){
   r.readAsText(f);
 }
 function importJSON(obj){
-  if(!obj || !Array.isArray(obj.images)){ alert('Not a Swatch Marker export.'); return; }
-  if(obj.sample && obj.sample.patchRadius!=null){ state.patchRadius = obj.sample.patchRadius; $('#radius').value = state.patchRadius; setPatchInfo(); }
+  if(!obj || obj.tool!=='swatch-marker' || !Array.isArray(obj.images)){ alert('Not a Swatch Marker export.'); return; }
+  state.patchRadius = obj.sample.patchRadius; $('#radius').value = state.patchRadius; setPatchInfo();
   const toSample = s => s ? { rgb:s.rgb, std:s.std, n:s.patchPixels } : null;
   state.draft = null;
-  state.globals = (obj.globalPoints||[]).map(g => ({
-    kind:g.kind, region:g.region||'', label:g.label||'', x:g.x, y:g.y,
-    samples: Object.fromEntries(Object.entries(g.samples||{}).map(([k,v]) => [k, toSample(v)]))
+  state.globals = obj.globalPoints.map(g => ({
+    kind:g.kind, region:g.region, label:g.label, x:g.x, y:g.y,
+    samples: Object.fromEntries(Object.entries(g.samples).map(([k,v]) => [k, toSample(v)]))
   }));
   const prev = new Map(state.images.map(im => [im.name, im])); // keep already-loaded pixels by filename
   state.images = obj.images.map(im => {
     const polygons = [];
-    (im.mask||[]).forEach(grp => {
-      (grp.polygons||[]).forEach(pts => polygons.push({ region:grp.region||'', type:'fill', pts }));
-      (grp.holes||[]).forEach(pts => polygons.push({ region:grp.region||'', type:'hole', pts }));
+    im.mask.forEach(grp => {
+      grp.polygons.forEach(pts => polygons.push({ region:grp.region||'', type:'fill', pts }));
+      grp.holes.forEach(pts => polygons.push({ region:grp.region||'', type:'hole', pts }));
     });
     const existing = prev.get(im.filename);
     return {
       name: im.filename, width: im.width, height: im.height, img: existing ? existing.img : null,
-      points: (im.points||[]).map(p => ({ kind:'swatch', region:p.region||'', label:p.label||'', x:p.x, y:p.y, rgb:p.rgb, std:p.std, n:p.patchPixels })),
+      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, n:p.patchPixels })),
       polygons
     };
   });
