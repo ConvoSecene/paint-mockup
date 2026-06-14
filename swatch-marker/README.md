@@ -24,8 +24,13 @@ Open <http://localhost:8000>.
 
 ## Kinds
 
-- `swatch` — a point on a paint swatch (label = colour name).
-- `wall` — a bare-wall reference point.
-- `neutral` — a fixed grey/white reference visible across frames.
+- `swatch` — **per-frame**. A point on a paint swatch in the active photo (label = colour name).
+- `wall` — **global**. Bare-wall reference. Place once; auto-sampled at the same pixel in every photo.
+- `neutral` — **global**. Fixed grey/white reference. Place once; auto-sampled in every photo.
+
+Global points (wall/neutral) are placed a single time and read from all frames automatically —
+their per-frame values differ (that's the cross-frame correction signal), but the *location* is
+identical, so don't re-pick them by hand. They show as lettered squares; swatches as numbered circles.
+Load all your photos before placing globals, or they back-fill any added later.
 
 Coordinates are natural-image pixels; RGB is gamma-encoded sRGB (linearized downstream).
