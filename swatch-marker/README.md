@@ -23,6 +23,11 @@ Open <http://localhost:8000>.
    re-place those on flat colour.
 5. **Copy JSON** or **Download .json**.
 
+To resume later, **Import JSON** (button or drag the `.json` in). It restores every point,
+global, region and polygon. The export doesn't contain the photos themselves, so re-drop them —
+they're matched to the restored data by filename (order doesn't matter). Frames awaiting their
+photo show as dashed ⚠ tabs.
+
 ## Kinds
 
 - `swatch` — **per-frame**. A point on a paint swatch in the active photo (label = colour name).
