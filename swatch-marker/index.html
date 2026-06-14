@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Swatch Marker</title>
+<style>
+  :root { --bg:#1b1d22; --panel:#24272e; --line:#363a44; --txt:#e6e8ec; --muted:#9aa0aa; --accent:#5b9cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  .main { display:flex; gap:0; height:calc(100vh - 49px); }
+  .stage { flex:1; overflow:auto; position:relative; background:#111 repeating-conic-gradient(#1a1a1a 0% 25%, #151515 0% 50%) 0/24px 24px; }
+  .side { width:380px; flex:none; border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; overflow:hidden; }
+  .side .scroll { overflow:auto; padding:12px; }
+  #drop { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); text-align:center; pointer-events:none; }
+  #drop.hide { display:none; }
+  .canvas-wrap { position:relative; display:inline-block; line-height:0; }
+  canvas#view { display:block; max-width:100%; cursor:crosshair; }
+  .loupe { position:fixed; width:160px; height:160px; border:2px solid var(--accent); border-radius:8px; pointer-events:none; display:none; z-index:50; box-shadow:0 4px 18px rgba(0,0,0,.5); background:#000; }
+  label.field { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  input, select, button { font:inherit; color:var(--txt); background:#2c303a; border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06122b; border-color:var(--accent); font-weight:600; }
+  .row { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+  .kindrow { display:flex; gap:6px; }
+  .kindrow button { flex:1; }
+  .kindrow button.on { background:var(--accent); color:#06122b; border-color:var(--accent); font-weight:600; }
+  .imgtabs { display:flex; gap:6px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--line); }
+  .imgtab { padding:4px 8px; border-radius:6px; background:#2c303a; border:1px solid var(--line); cursor:pointer; font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .imgtab.on { border-color:var(--accent); color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--muted); font-weight:500; }
+  .chip { width:18px; height:18px; border-radius:4px; border:1px solid #000; display:inline-block; vertical-align:middle; }
+  .del { padding:2px 6px; font-size:11px; color:#ff8a8a; background:transparent; border-color:transparent; }
+  .del:hover { border-color:#ff8a8a; }
+  .mono { font-family:ui-monospace, Menlo, monospace; }
+  textarea { width:100%; height:160px; background:#161922; color:#cfe; border:1px solid var(--line); border-radius:6px; padding:8px; font-family:ui-monospace,monospace; font-size:11px; resize:vertical; }
+  .hint { color:var(--muted); font-size:12px; }
+  .sectitle { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:14px 0 6px; }
+  .spread-warn { color:#ffc34d; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Swatch Marker</h1>
+  <label class="field" style="flex-direction:row;align-items:center;gap:6px;">
+    Patch radius
+    <input id="radius" type="number" min="0" max="40" value="6" style="width:64px" />
+    <span class="hint" id="patchinfo"></span>
+  </label>
+  <input id="file" type="file" accept="image/*" multiple style="margin-left:auto" />
+</header>
+
+<div class="main">
+  <div class="stage" id="stage">
+    <div id="drop">Drop iPhone photos here, or use the file picker (top-right).<br>
+      <span class="hint">HEIC won't display in most browsers — export/convert to JPEG first.</span></div>
+    <div class="imgtabs" id="imgtabs" style="display:none"></div>
+    <div class="canvas-wrap" id="cwrap" style="display:none">
+      <canvas id="view"></canvas>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="scroll">
+      <div class="sectitle">New point</div>
+      <div class="kindrow" id="kindrow">
+        <button data-kind="swatch" class="on">swatch</button>
+        <button data-kind="wall">wall</button>
+        <button data-kind="neutral">neutral</button>
+      </div>
+      <label class="field" style="margin-top:8px">Label (paint name / reference id)
+        <input id="label" list="labels" placeholder="e.g. Hague Blue" />
+        <datalist id="labels"></datalist>
+      </label>
+      <p class="hint">Click on the photo to drop a point. New points use the kind + label above. Click an existing point's row to recolour/relabel it isn't supported — just delete and re-add.</p>
+
+      <div class="sectitle">Points <span id="count" class="hint"></span></div>
+      <table id="ptable"><thead>
+        <tr><th></th><th>kind</th><th>label</th><th>x,y</th><th>rgb</th><th>±</th><th></th></tr>
+      </thead><tbody></tbody></table>
+
+      <div class="sectitle">Export</div>
+      <div class="row">
+        <button class="primary" id="copy">Copy JSON</button>
+        <button id="download">Download .json</button>
+        <button id="clearimg">Clear this image's points</button>
+      </div>
+      <p class="hint" id="copymsg"></p>
+      <textarea id="json" readonly></textarea>
+    </div>
+  </div>
+</div>
+
+<canvas class="loupe" id="loupe" width="160" height="160"></canvas>
+
+<script>
+const SAMPLE_VERSION = 1;
+const state = { patchRadius: 6, images: [], active: -1, kind: 'swatch' };
+
+const $ = s => document.querySelector(s);
+const view = $('#view'), vctx = view.getContext('2d', { willReadFrequently:true });
+const loupe = $('#loupe'), lctx = loupe.getContext('2d');
+let imgData = null; // cached ImageData of active image at natural res
+
+// ---------- file loading ----------
+function loadFiles(fileList){
+  [...fileList].forEach(f => {
+    if(!f.type.startsWith('image/') && !/\.(jpe?g|png|webp|bmp)$/i.test(f.name)) return;
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      state.images.push({ name:f.name, width:img.naturalWidth, height:img.naturalHeight, img, points:[] });
+      if(state.active === -1) setActive(state.images.length-1);
+      renderTabs();
+    };
+    img.onerror = () => alert('Could not load '+f.name+' — if it is HEIC, convert to JPEG first.');
+    img.src = url;
+  });
+}
+$('#file').addEventListener('change', e => loadFiles(e.target.files));
+['dragover','dragenter'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); }));
+window.addEventListener('drop', e => { e.preventDefault(); if(e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+// ---------- active image ----------
+function setActive(i){
+  state.active = i;
+  const im = state.images[i];
+  view.width = im.width; view.height = im.height;
+  vctx.drawImage(im.img, 0, 0);
+  imgData = vctx.getImageData(0, 0, im.width, im.height);
+  $('#drop').classList.add('hide');
+  $('#cwrap').style.display = 'inline-block';
+  $('#imgtabs').style.display = 'flex';
+  redraw();
+  renderTabs(); renderTable(); updateJSON();
+}
+
+function renderTabs(){
+  const wrap = $('#imgtabs'); wrap.innerHTML = '';
+  state.images.forEach((im,i) => {
+    const t = document.createElement('div');
+    t.className = 'imgtab' + (i===state.active?' on':'');
+    t.textContent = `${im.name} (${im.points.length})`;
+    t.title = im.name;
+    t.onclick = () => setActive(i);
+    wrap.appendChild(t);
+  });
+}
+
+// ---------- sampling ----------
+function samplePatch(cx, cy, r){
+  const W = imgData.width, H = imgData.height, d = imgData.data;
+  const rs=[], gs=[], bs=[];
+  for(let y=Math.max(0,cy-r); y<=Math.min(H-1,cy+r); y++){
+    for(let x=Math.max(0,cx-r); x<=Math.min(W-1,cx+r); x++){
+      const o=(y*W+x)*4; rs.push(d[o]); gs.push(d[o+1]); bs.push(d[o+2]);
+    }
+  }
+  const med = a => { a.sort((p,q)=>p-q); const m=a.length>>1; return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2); };
+  const sd = a => { const m=a.reduce((s,v)=>s+v,0)/a.length; return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length); };
+  return { rgb:[med(rs.slice()),med(gs.slice()),med(bs.slice())], std:[sd(rs),sd(gs),sd(bs)].map(v=>+v.toFixed(1)), n:rs.length };
+}
+
+// ---------- clicking ----------
+view.addEventListener('click', e => {
+  if(state.active<0) return;
+  const rect = view.getBoundingClientRect();
+  const sx = view.width/rect.width, sy = view.height/rect.height;
+  const x = Math.round((e.clientX-rect.left)*sx), y = Math.round((e.clientY-rect.top)*sy);
+  const s = samplePatch(x, y, state.patchRadius);
+  state.images[state.active].points.push({
+    id: Date.now()%100000, kind: state.kind, label: $('#label').value.trim(),
+    x, y, rgb:s.rgb, std:s.std, n:s.n
+  });
+  refreshLabels();
+  redraw(); renderTable(); renderTabs(); updateJSON();
+});
+
+// ---------- drawing markers ----------
+function redraw(){
+  const im = state.images[state.active];
+  vctx.drawImage(im.img, 0, 0);
+  const R = Math.max(im.width/180, 7);
+  im.points.forEach((p,idx) => {
+    vctx.lineWidth = R*0.35;
+    vctx.strokeStyle = '#000'; vctx.beginPath(); vctx.arc(p.x,p.y,R,0,7); vctx.stroke();
+    vctx.strokeStyle = '#fff'; vctx.lineWidth = R*0.18; vctx.beginPath(); vctx.arc(p.x,p.y,R,0,7); vctx.stroke();
+    vctx.fillStyle = '#fff'; vctx.font = `bold ${R*1.4}px sans-serif`; vctx.textBaseline='middle';
+    vctx.strokeStyle='#000'; vctx.lineWidth=R*0.25; vctx.strokeText(idx+1, p.x+R*1.3, p.y);
+    vctx.fillText(idx+1, p.x+R*1.3, p.y);
+  });
+}
+
+// ---------- loupe magnifier ----------
+view.addEventListener('mousemove', e => {
+  if(state.active<0) return;
+  const rect = view.getBoundingClientRect();
+  const sx = view.width/rect.width, sy = view.height/rect.height;
+  const x = (e.clientX-rect.left)*sx, y = (e.clientY-rect.top)*sy;
+  const src = 24; // source half-size in natural px
+  loupe.style.display='block';
+  loupe.style.left = Math.min(window.innerWidth-170, e.clientX+18)+'px';
+  loupe.style.top  = Math.min(window.innerHeight-170, e.clientY+18)+'px';
+  lctx.imageSmoothingEnabled=false;
+  lctx.clearRect(0,0,160,160);
+  lctx.drawImage(state.images[state.active].img, x-src, y-src, src*2, src*2, 0,0,160,160);
+  // patch box + crosshair
+  const scale = 160/(src*2), r=state.patchRadius;
+  lctx.strokeStyle='#5b9cff'; lctx.lineWidth=1;
+  lctx.strokeRect(80-r*scale, 80-r*scale, (r*2+1)*scale, (r*2+1)*scale);
+  lctx.strokeStyle='rgba(255,255,255,.7)';
+  lctx.beginPath(); lctx.moveTo(80,72); lctx.lineTo(80,88); lctx.moveTo(72,80); lctx.lineTo(88,80); lctx.stroke();
+});
+view.addEventListener('mouseleave', () => loupe.style.display='none');
+
+// ---------- table ----------
+function renderTable(){
+  const tb = $('#ptable tbody'); tb.innerHTML='';
+  const im = state.images[state.active]; if(!im) return;
+  im.points.forEach((p,idx) => {
+    const tr = document.createElement('tr');
+    const warn = Math.max(...p.std) > 6 ? ' class="spread-warn"' : '';
+    tr.innerHTML = `<td>${idx+1} <span class="chip" style="background:rgb(${p.rgb})"></span></td>
+      <td>${p.kind}</td><td>${p.label||'<span class="hint">—</span>'}</td>
+      <td class="mono">${p.x},${p.y}</td>
+      <td class="mono">${p.rgb.join(',')}</td>
+      <td class="mono"${warn}>${Math.max(...p.std).toFixed(0)}</td>
+      <td><button class="del">✕</button></td>`;
+    tr.querySelector('.del').onclick = () => { im.points.splice(idx,1); redraw(); renderTable(); renderTabs(); updateJSON(); };
+    tb.appendChild(tr);
+  });
+  $('#count').textContent = im.points.length ? `(${im.points.length})` : '';
+}
+
+function refreshLabels(){
+  const seen = new Set();
+  state.images.forEach(im => im.points.forEach(p => p.label && seen.add(p.label)));
+  $('#labels').innerHTML = [...seen].map(l=>`<option value="${l}">`).join('');
+}
+
+// ---------- export ----------
+function buildExport(){
+  return {
+    tool: 'swatch-marker', version: SAMPLE_VERSION,
+    sample: { patchRadius: state.patchRadius, statistic: 'median', spread: 'stddev',
+              colorSpace: 'srgb-8bit-gamma', coordinates: 'natural-image-pixels' },
+    images: state.images.map(im => ({
+      filename: im.name, width: im.width, height: im.height,
+      points: im.points.map(p => ({ kind:p.kind, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, patchPixels:p.n }))
+    }))
+  };
+}
+function updateJSON(){ $('#json').value = JSON.stringify(buildExport(), null, 2); }
+
+$('#copy').onclick = async () => {
+  updateJSON();
+  try { await navigator.clipboard.writeText($('#json').value); $('#copymsg').textContent='Copied to clipboard ✓'; }
+  catch { $('#json').select(); $('#copymsg').textContent='Clipboard blocked — select the text box and copy manually.'; }
+  setTimeout(()=>$('#copymsg').textContent='', 2500);
+};
+$('#download').onclick = () => {
+  updateJSON();
+  const blob = new Blob([$('#json').value], {type:'application/json'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='swatch-points.json'; a.click();
+};
+$('#clearimg').onclick = () => {
+  if(state.active<0) return;
+  if(confirm('Delete all points on this image?')){ state.images[state.active].points=[]; redraw(); renderTable(); renderTabs(); updateJSON(); }
+};
+
+// ---------- controls ----------
+$('#radius').addEventListener('input', e => {
+  state.patchRadius = Math.max(0, Math.min(40, +e.target.value||0));
+  $('#patchinfo').textContent = `${state.patchRadius*2+1}×${state.patchRadius*2+1} px median`;
+  updateJSON();
+});
+$('#kindrow').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  state.kind = b.dataset.kind;
+  [...$('#kindrow').children].forEach(c => c.classList.toggle('on', c===b));
+});
+$('#patchinfo').textContent = '13×13 px median';
+</script>
+</body>
+</html>
