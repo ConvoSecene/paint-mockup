@@ -68,6 +68,12 @@
 
   <div class="side">
     <div class="scroll">
+      <div class="kindrow" id="modebar" style="margin-bottom:12px">
+        <button data-mode="points" class="on">Mark points</button>
+        <button data-mode="mask">Draw mask</button>
+      </div>
+
+      <div id="pointsPanel">
       <div class="sectitle">New point</div>
       <div class="kindrow" id="kindrow">
         <button data-kind="swatch" class="on">swatch</button>
@@ -93,6 +99,29 @@
       <table id="ptable"><thead>
         <tr><th></th><th>region</th><th>label</th><th>x,y</th><th>rgb</th><th>±</th><th></th></tr>
       </thead><tbody></tbody></table>
+      </div><!-- /pointsPanel -->
+
+      <div id="maskPanel" style="display:none">
+        <div class="sectitle">Mask region</div>
+        <label class="field">Region (source surface)
+          <input id="maskRegion" list="regions" placeholder="blank = single wall" />
+        </label>
+        <div class="kindrow" id="typerow" style="margin-top:8px">
+          <button data-type="fill" class="on">fill (wall)</button>
+          <button data-type="hole">hole (occluder)</button>
+        </div>
+        <p class="hint" id="maskhint">Pick a region, then click to drop polygon vertices.
+          Finish (or Enter) to close, Backspace to undo a vertex, Esc to cancel. Min 3 vertices.</p>
+        <div class="row">
+          <button class="primary" id="finishPoly">Finish polygon</button>
+          <button id="cancelPoly">Cancel</button>
+          <span class="hint" id="draftinfo"></span>
+        </div>
+        <div class="sectitle">Polygons <span class="hint">— this frame</span></div>
+        <table id="polytable"><thead>
+          <tr><th></th><th>region</th><th>type</th><th>pts</th><th></th></tr>
+        </thead><tbody></tbody></table>
+      </div>
 
       <div class="sectitle">Export</div>
       <div class="row">
@@ -109,13 +138,13 @@
 <canvas class="loupe" id="loupe" width="160" height="160"></canvas>
 
 <script>
-const SAMPLE_VERSION = 3;
-const state = { patchRadius: 6, images: [], globals: [], active: -1, kind: 'swatch' };
+const SAMPLE_VERSION = 4;
+const state = { patchRadius: 6, images: [], globals: [], active: -1, kind: 'swatch', mode: 'points', draft: null };
 const REGION_PALETTE = ['#ff6b6b','#4dd2ff','#ffd24d','#9d7bff','#5bff9d','#ff8ad8','#ff9d4d','#7dff4d'];
 function regionColors(){
   const order=[]; const add=r=>{ if(r && !order.includes(r)) order.push(r); };
   state.globals.forEach(g=>add(g.region));
-  state.images.forEach(im=>im.points.forEach(p=>add(p.region)));
+  state.images.forEach(im=>{ im.points.forEach(p=>add(p.region)); im.polygons.forEach(p=>add(p.region)); });
   const map={}; order.forEach((r,i)=>map[r]=REGION_PALETTE[i%REGION_PALETTE.length]);
   return map;
 }
@@ -158,7 +187,7 @@ function loadFiles(fileList){
     if(!f.type.startsWith('image/') && !/\.(jpe?g|png|webp|bmp)$/i.test(f.name)) return;
     const img = new Image();
     img.onload = () => {
-      const im = { name:f.name, width:img.naturalWidth, height:img.naturalHeight, img, points:[] };
+      const im = { name:f.name, width:img.naturalWidth, height:img.naturalHeight, img, points:[], polygons:[] };
       state.images.push(im);
       const r = state.patchRadius;
       state.globals.forEach(g => g.samples[im.name] = samplePatch(im, g.x, g.y, r)); // back-fill new frame
@@ -180,7 +209,8 @@ function setActive(i){
   $('#drop').classList.add('hide');
   $('#cwrap').style.display = 'inline-block';
   $('#imgtabs').style.display = 'flex';
-  redraw(); renderTabs(); renderTables(); updateJSON();
+  state.draft = null;
+  redraw(); renderTabs(); renderTables(); renderPolyTable(); updateDraftInfo(); updateJSON();
 }
 function renderTabs(){
   const wrap = $('#imgtabs'); wrap.innerHTML = '';
@@ -199,6 +229,7 @@ view.addEventListener('click', e => {
   const rect = view.getBoundingClientRect();
   const x = Math.round((e.clientX-rect.left) * view.width/rect.width);
   const y = Math.round((e.clientY-rect.top)  * view.height/rect.height);
+  if(state.mode==='mask'){ addVertex(x,y); return; }
   const label = state.kind==='swatch' ? $('#label').value.trim() : '';
   const region = state.kind==='neutral' ? '' : $('#region').value.trim();
   if(state.kind === 'swatch'){
@@ -234,6 +265,9 @@ function redraw(){
     vctx.lineWidth=R*0.18; vctx.strokeStyle=col; vctx.beginPath(); vctx.arc(p.x,p.y,R,0,7); vctx.stroke();
     drawTag(idx+1, p.x+R*1.3, p.y, R, col);
   });
+  // mask polygons
+  im.polygons.forEach(poly => drawPolygon(poly, rc, false));
+  if(state.mode==='mask' && state.draft) drawPolygon(state.draft, rc, true);
 }
 function drawTag(t, x, y, R, color){
   vctx.font = `bold ${R*1.4}px sans-serif`; vctx.textBaseline='middle';
@@ -321,7 +355,8 @@ function buildExport(){
     })),
     images: state.images.map(im => ({
       filename:im.name, width:im.width, height:im.height,
-      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, patchPixels:p.n }))
+      points: im.points.map(p => ({ kind:'swatch', region:p.region, label:p.label, x:p.x, y:p.y, rgb:p.rgb, std:p.std, patchPixels:p.n })),
+      mask: groupPolys(im.polygons)
     }))
   };
 }
@@ -362,6 +397,89 @@ $('#kindrow').addEventListener('click', e => {
 });
 setPatchInfo();
 applyKindUI();
+
+// ---------- masking ----------
+let maskType = 'fill';
+function updateDraftInfo(){ $('#draftinfo').textContent = state.draft ? `${state.draft.pts.length} vertices placed` : ''; }
+function addVertex(x,y){
+  if(!state.draft) state.draft = { region:$('#maskRegion').value.trim(), type:maskType, pts:[] };
+  state.draft.pts.push([x,y]);
+  redraw(); updateDraftInfo();
+}
+function finishPoly(){
+  const d = state.draft;
+  if(!d || d.pts.length<3){ $('#maskhint').textContent='Need at least 3 vertices before finishing.'; return; }
+  state.images[state.active].polygons.push(d);
+  state.draft = null;
+  $('#maskhint').textContent='Polygon added. Click to start another.';
+  redraw(); renderPolyTable(); updateDraftInfo(); updateJSON();
+}
+function cancelDraft(){ state.draft = null; redraw(); updateDraftInfo(); }
+function groupPolys(polys){
+  const map = new Map();
+  polys.forEach(p => {
+    const key = p.region || '';
+    if(!map.has(key)) map.set(key, { region:p.region||null, polygons:[], holes:[] });
+    (p.type==='hole' ? map.get(key).holes : map.get(key).polygons).push(p.pts);
+  });
+  return [...map.values()];
+}
+function renderPolyTable(){
+  const im = state.images[state.active]; const tb = $('#polytable tbody'); tb.innerHTML='';
+  if(!im) return;
+  const rc = regionColors();
+  im.polygons.forEach((p,idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${idx+1}</td>${regionCell(p.region, rc)}<td>${p.type}</td><td>${p.pts.length}</td><td><button class="del">✕</button></td>`;
+    tr.querySelector('.del').onclick = () => { im.polygons.splice(idx,1); redraw(); renderPolyTable(); updateJSON(); };
+    tb.appendChild(tr);
+  });
+}
+function hexToRgba(hex,a){
+  let h=hex.replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join('');
+  const n=parseInt(h,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function drawPolygon(poly, rc, isDraft){
+  const pts = poly.pts; if(!pts.length) return;
+  const im = state.images[state.active]; const R = Math.max(im.width/180, 7);
+  const col = poly.region ? (rc[poly.region]||'#ffffff') : '#ffffff';
+  vctx.beginPath();
+  pts.forEach((p,i) => i ? vctx.lineTo(p[0],p[1]) : vctx.moveTo(p[0],p[1]));
+  if(!isDraft) vctx.closePath();
+  vctx.lineWidth = R*0.3;
+  if(poly.type==='hole'){ vctx.setLineDash([R*1.5,R]); vctx.strokeStyle='#ff5b5b'; vctx.fillStyle='rgba(255,50,50,0.18)'; }
+  else { vctx.setLineDash([]); vctx.strokeStyle=col; vctx.fillStyle=hexToRgba(col,0.22); }
+  if(!isDraft) vctx.fill();
+  vctx.stroke(); vctx.setLineDash([]);
+  pts.forEach((p,i) => {
+    vctx.beginPath(); vctx.arc(p[0],p[1], R*0.5, 0, 7);
+    vctx.fillStyle = (isDraft && i===0) ? '#5b9cff' : (isDraft ? '#fff' : col); vctx.fill();
+    vctx.lineWidth = R*0.15; vctx.strokeStyle='#000'; vctx.stroke();
+  });
+}
+$('#modebar').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  state.mode = b.dataset.mode;
+  [...$('#modebar').children].forEach(c => c.classList.toggle('on', c.dataset.mode===state.mode));
+  $('#pointsPanel').style.display = state.mode==='points' ? '' : 'none';
+  $('#maskPanel').style.display   = state.mode==='mask'   ? '' : 'none';
+  if(state.mode!=='mask') state.draft = null;
+  redraw(); updateDraftInfo();
+});
+$('#typerow').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  maskType = b.dataset.type;
+  [...$('#typerow').children].forEach(c => c.classList.toggle('on', c.dataset.type===maskType));
+});
+$('#finishPoly').onclick = finishPoly;
+$('#cancelPoly').onclick = cancelDraft;
+window.addEventListener('keydown', e => {
+  if(state.mode!=='mask') return;
+  if(/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if(e.key==='Enter') finishPoly();
+  else if(e.key==='Escape') cancelDraft();
+  else if(e.key==='Backspace' && state.draft){ state.draft.pts.pop(); redraw(); updateDraftInfo(); e.preventDefault(); }
+});
 </script>
 </body>
 </html>

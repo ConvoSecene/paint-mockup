@@ -44,4 +44,20 @@ sample placed on it, because the paint-over transfer depends on the colour under
 Points are colour-coded by region on the canvas and in the tables (squares = global, circles =
 swatch). Leave region blank for single-colour rooms. Region names autocomplete once used.
 
+## Masks (Draw mask mode)
+
+Switch the top toggle to **Draw mask** to outline where each wall actually is — the downstream
+tool only repaints inside the mask, and uses it to decide which region's transfer applies where.
+
+1. Pick a **region** (same names as your points; blank = single wall).
+2. Choose **fill (wall)** or **hole (occluder)**.
+3. **Click** around the wall to drop polygon vertices. **Finish** (or Enter) closes it,
+   **Backspace** undoes the last vertex, **Esc** cancels.
+4. Add **hole** polygons for things in front of the wall (furniture, radiator, pictures, sockets)
+   — they get cut out of that region.
+
+Polygons belong to the frame they're drawn on; draw them on your clean bare-wall reference photo.
+A wall is a plane, so its outline is usually 4–6 clicks. Per-region polygons double as the region
+map — no separate segmentation needed.
+
 Coordinates are natural-image pixels; RGB is gamma-encoded sRGB (linearized downstream).
